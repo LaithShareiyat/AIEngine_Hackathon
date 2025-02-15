@@ -1,10 +1,28 @@
+import dotenv from 'dotenv';
+
+// Load environment variables before anything else
+dotenv.config();
+
 import express from 'express';
+import path from 'path';
 import { JiraService } from './services/jiraService';
 import { WorkloadAnalyzer } from './services/workloadAnalyzer';
+import memberRoutes from './routes/memberRoutes';
 import pool from './config/database';
 
 const app = express();
 app.use(express.json());
+
+// Add this line to serve static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Add this route to serve the HTML file
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Add member routes
+app.use('/api', memberRoutes);
 
 const jiraService = new JiraService();
 const workloadAnalyzer = new WorkloadAnalyzer();

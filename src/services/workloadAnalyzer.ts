@@ -1,12 +1,12 @@
 import { Employee, JiraTask, WorkloadMetrics } from '../types';
-import { Configuration, OpenAI } from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 export class WorkloadAnalyzer {
-  private anthropic: OpenAI;
+  private anthropic: Anthropic;
 
   constructor() {
-    this.anthropic = new OpenAI({
-      apiKey: process.env.ANTHROPIC_API_KEY,
+    this.anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY
     });
   }
 
@@ -73,8 +73,9 @@ export class WorkloadAnalyzer {
   ): Promise<Map<string, string[]>> {
     const prompt = this.buildRedistributionPrompt(employees, allTasks);
     
-    const response = await this.anthropic.chat.completions.create({
-      model: "claude-3-sonnet-20240229",
+    const response = await this.anthropic.messages.create({
+      model: "claude-3-opus-20240229",
+      max_tokens: 1000,
       messages: [{
         role: "user",
         content: prompt
@@ -82,7 +83,12 @@ export class WorkloadAnalyzer {
       temperature: 0.7,
     });
 
-    return this.parseRedistributionSuggestions(response.choices[0].message.content);
+    if (response.content[0].type === 'text') {
+      return this.parseRedistributionSuggestions(response.content[0].text);
+    }
+
+    console.error('Unexpected response format from Claude');
+    return new Map();
   }
 
   private buildRedistributionPrompt(employees: Employee[], tasks: JiraTask[]): string {
@@ -117,6 +123,165 @@ export class WorkloadAnalyzer {
     } catch (error) {
       console.error('Error parsing redistribution suggestions:', error);
       return new Map();
+    }
+  }
+
+  async getAIWorkloadSuggestions(
+    employees: Employee[],
+    tasks: JiraTask[]
+  ): Promise<string> {
+    const todoTasks = tasks.filter(task => task.status === 'To Do');
+
+    // Add very detailed debug logging for skill matching
+    console.log('\n=== DETAILED TASK-TO-SKILLS ANALYSIS ===');
+    todoTasks.forEach(task => {
+      console.log(`\nAnalyzing Task: "${task.summary}" (${task.id})`);
+      console.log('Task Labels Required:', task.labels);
+      
+      const currentAssignee = employees.find(e => e.id === task.assigneeId);
+      console.log(`Current Assignee: ${currentAssignee?.name}`);
+      console.log('Current Assignee Skills:', currentAssignee?.skills);
+      
+      employees.forEach(emp => {
+        if (emp.id !== task.assigneeId) { // Only check potential new assignees
+          console.log(`\nChecking ${emp.name} as potential assignee:`);
+          console.log('Their Skills:', emp.skills);
+          
+          // Check each required label
+          const skillCheck = task.labels.map(label => {
+            const hasSkill = emp.skills.includes(label);
+            console.log(`- Label "${label}": ${hasSkill ? '✓ MATCH' : '✗ MISSING'}`);
+            return hasSkill;
+          });
+          
+          const canHandle = skillCheck.every(Boolean);
+          console.log(`Can ${emp.name} handle this task? ${canHandle ? 'YES' : 'NO - Missing required skills'}`);
+        }
+      });
+    });
+
+    const prompt = `
+      As a workload management expert, analyze the following team data and provide ONLY specific move recommendations:
+
+      Team Members and their skills:
+      ${employees.map(e => `- ${e.name} (AccountID: ${e.id}): 
+         * Skills: [${e.skills.join(', ')}]
+         * Current Workload: ${Math.round(e.workloadIntensity * 100)}%
+         * Weekly Hours: ${e.weeklyHours}h`).join('\n')}
+
+      Tasks that CAN be redistributed (To Do):
+      ${todoTasks.map(t => `- Task "${t.summary}" (ID: ${t.id})
+         * Current Assignee: ${employees.find(e => e.id === t.assigneeId)?.name}
+         * Current AssigneeId: ${t.assigneeId}
+         * Required Labels: [${t.labels.join(', ')}]
+         * Estimated Hours: ${t.estimatedHours}h
+         * Priority: ${t.priority}`).join('\n')}
+
+      STRICT TASK MOVEMENT RULES:
+      1. A task can ONLY be moved if:
+         - The new assignee has EVERY SINGLE task label in their skills list (100% match required)
+         - The move helps balance workload between Laith and Hasan
+         - The new assignee is different from the current assignee
+      2. Skill Matching Process:
+         - Take each task label
+         - Check if it exists in the new assignee's skills list
+         - ALL labels must be found in skills, not just some
+         - If even one label is missing, the task CANNOT be moved
+      3. IMPORTANT: Use the FULL account ID when specifying assignees (e.g., "712020:b387b831-64c5-4928-8a76-a88b367945b7")
+
+      RESPONSE FORMAT:
+      For each valid move, provide EXACTLY this format with no additional text:
+      MOVE_SUGGESTION
+      TaskID: [ID]
+      TaskName: [Name]
+      FromAssignee: [Current Name]
+      FromAssigneeId: [Full Account ID like "712020:b387b831-64c5-4928-8a76-a88b367945b7"]
+      ToAssignee: [New Name]
+      ToAssigneeId: [Full Account ID like "712020:47f33f35-fe06-4bd7-8326-a629099e37b7"]
+      WorkloadChanges:
+      - [Current]: [Before]% -> [After]%
+      - [New]: [Before]% -> [After]%
+      END_SUGGESTION
+
+      If no moves are possible, return exactly: NO_MOVES_POSSIBLE
+    `;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: "claude-3-opus-20240229",
+        max_tokens: 1500,
+        temperature: 0.7,
+        messages: [{
+          role: "user",
+          content: prompt
+        }]
+      });
+
+      const suggestions = response.content[0].type === 'text' ? response.content[0].text : 'No suggestions available';
+
+      if (suggestions === 'NO_MOVES_POSSIBLE') {
+        return JSON.stringify({
+          hasSuggestions: false,
+          message: "No moves recommended - strict requirements not met."
+        });
+      }
+
+      // Parse the moves from the response
+      const moves = suggestions.split('MOVE_SUGGESTION')
+        .filter(move => move.trim())
+        .map(move => {
+          console.log('Raw move suggestion:', move); // Debug log
+
+          const lines = move.split('\n').filter(line => line.trim());
+          const moveData: any = {
+            workloadChanges: {
+              from: '',
+              to: ''
+            }
+          };
+
+          lines.forEach(line => {
+            if (line.includes(':')) {
+              // Split only on the first occurrence of ':'
+              const [key, ...valueParts] = line.split(':');
+              const value = valueParts.join(':').trim(); // Rejoin the rest with ':' to preserve full ID
+              
+              console.log('Parsing line:', { key: key.trim(), value }); // Debug log
+
+              if (key.trim().startsWith('- ')) {
+                // Handle workload changes
+                const assignee = key.trim().replace('- ', '');
+                if (assignee === moveData.FromAssignee) {
+                  moveData.workloadChanges.from = value;
+                } else {
+                  moveData.workloadChanges.to = value;
+                }
+              } else if (key.trim() !== 'WorkloadChanges') {
+                moveData[key.trim()] = value;
+              }
+            }
+          });
+
+          console.log('Parsed move data:', moveData); // Debug log
+          return moveData;
+        })
+        .filter(move => {
+          // Validate the move data
+          const isValid = move.TaskID && move.TaskName && move.ToAssigneeId && move.ToAssigneeId.includes(':');
+          if (!isValid) {
+            console.error('Invalid move data:', move);
+          }
+          return isValid;
+        });
+
+      return JSON.stringify({
+        hasSuggestions: moves.length > 0,
+        moves: moves
+      });
+
+    } catch (error) {
+      console.error('Error getting AI suggestions:', error);
+      throw error;
     }
   }
 } 
