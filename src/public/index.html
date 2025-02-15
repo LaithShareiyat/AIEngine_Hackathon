@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Skills Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8 text-white">Team Member Skills</h1>
+        
+        <!-- Skills List Section -->
+        <div class="mb-8">
+            <h2 class="text-2xl font-bold mb-4 text-white">Skills</h2>
+            <div id="skillsList" class="flex flex-wrap gap-2">
+                <!-- Skills will be added here dynamically -->
+            </div>
+        </div>
+
+        <!-- AI Suggestions Section -->
+        <div class="mb-8">
+            <h2 class="text-2xl font-bold mb-4 flex items-center text-white">
+                AI Workload Suggestions
+                <button onclick="loadAISuggestions()" 
+                        class="ml-4 bg-blue-600 text-white px-4 py-2 rounded-full text-sm hover:bg-blue-700">
+                    Refresh Suggestions
+                </button>
+            </h2>
+            <div id="aiSuggestions" class="bg-gray-800 rounded-lg shadow-xl p-6 text-gray-300">
+                <p class="text-gray-400">Click refresh to get AI-powered workload suggestions...</p>
+            </div>
+        </div>
+
+        <div id="membersList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Members will be added here dynamically -->
+        </div>
+    </div>
+
+    <script>
+        let AVAILABLE_SKILLS = [];
+        
+        async function loadSkills() {
+            try {
+                const response = await fetch('/api/skills');
+                AVAILABLE_SKILLS = await response.json();
+                AVAILABLE_SKILLS.sort();
+                
+                const skillsList = document.getElementById('skillsList');
+                skillsList.innerHTML = AVAILABLE_SKILLS.map(skill => `
+                    <span class="bg-gray-700 text-blue-300 px-3 py-1 rounded-full text-sm">
+                        ${skill}
+                    </span>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load skills:', error);
+                AVAILABLE_SKILLS = [];
+            }
+        }
+
+        async function loadMembers() {
+            await loadSkills();  // Load skills first
+            try {
+                const response = await fetch('/api/members');
+                const members = await response.json();
+                
+                const membersList = document.getElementById('membersList');
+                membersList.innerHTML = '';
+
+                members.forEach(member => {
+                    const memberCard = createMemberCard(member);
+                    membersList.appendChild(memberCard);
+                });
+            } catch (error) {
+                console.error('Failed to load members:', error);
+            }
+        }
+
+        function createMemberCard(member) {
+            const div = document.createElement('div');
+            div.className = 'bg-gray-800 rounded-lg shadow-xl p-6';
+            
+            function getWorkloadBadge(intensity) {
+                let colorClasses;
+                let label;
+                const percentage = Math.round(intensity * 100);
+                
+                if (percentage <= 30) {
+                    colorClasses = 'bg-green-600 text-white';
+                    label = 'Light';
+                } else if (percentage <= 70) {
+                    colorClasses = 'bg-yellow-600 text-white';
+                    label = 'Moderate';
+                } else if (percentage <= 100) {
+                    colorClasses = 'bg-red-500 text-white';
+                    label = 'Heavy';
+                } else {
+                    colorClasses = 'bg-red-700 text-white';
+                    label = 'Overloaded';
+                }
+                
+                return `
+                    <div class="mt-2">
+                        <span class="${colorClasses} text-sm px-3 py-1 rounded-full font-medium">
+                            ${label} (${percentage}%)
+                        </span>
+                    </div>
+                `;
+            }
+
+            div.innerHTML = `
+                <div class="flex items-start justify-between">
+                    <div class="flex items-start">
+                        <img src="${member.avatar}" alt="${member.name}" class="w-12 h-12 rounded-full mr-4">
+                        <div>
+                            <h3 class="text-lg font-semibold mb-1 text-white">${member.name}</h3>
+                            ${getWorkloadBadge(member.workloadIntensity)}
+                            <div class="mt-2 text-sm text-gray-400">
+                                Weekly Hours: ${member.weeklyHours}h
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <h4 class="text-sm font-semibold mb-2 text-gray-300">Skills</h4>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        ${member.skills.map(skill => `
+                            <span class="bg-gray-700 text-blue-300 px-2 py-1 rounded-full text-xs flex items-center">
+                                ${skill}
+                                <button onclick="removeSkill('${member.id}', '${skill}')" 
+                                        class="ml-2 text-gray-400 hover:text-gray-200">×</button>
+                            </span>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-3">
+                        <select multiple 
+                                onchange="handleSkillsChange('${member.id}', this)" 
+                                class="w-full text-sm border border-gray-700 rounded p-2 bg-gray-700 text-gray-200 min-h-[100px]">
+                            ${AVAILABLE_SKILLS
+                                .filter(skill => !member.skills.includes(skill))
+                                .map(skill => `<option value="${skill}">${skill}</option>`)
+                                .join('')}
+                        </select>
+                        <button onclick="addSelectedSkills('${member.id}')" 
+                                class="mt-2 bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 w-full">
+                            Add Selected Skills
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            return div;
+        }
+
+        let selectedSkillsMap = new Map();
+
+        function handleSkillsChange(memberId, selectElement) {
+            const selectedOptions = Array.from(selectElement.selectedOptions).map(option => option.value);
+            selectedSkillsMap.set(memberId, selectedOptions);
+        }
+
+        async function addSelectedSkills(memberId) {
+            const selectedSkills = selectedSkillsMap.get(memberId) || [];
+            if (selectedSkills.length === 0) return;
+
+            const member = await getMemberSkills(memberId);
+            const updatedSkills = [...member.skills, ...selectedSkills];
+            
+            await updateMemberSkills(memberId, updatedSkills);
+            selectedSkillsMap.delete(memberId); // Clear the selection after adding
+        }
+
+        async function removeSkill(memberId, skillToRemove) {
+            const member = await getMemberSkills(memberId);
+            const updatedSkills = member.skills.filter(skill => skill !== skillToRemove);
+            
+            await updateMemberSkills(memberId, updatedSkills);
+        }
+
+        async function getMemberSkills(memberId) {
+            const response = await fetch('/api/members');
+            const members = await response.json();
+            return members.find(m => m.id === memberId);
+        }
+
+        async function updateMemberSkills(memberId, skills) {
+            try {
+                const response = await fetch(`/api/members/${memberId}/skills`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ skills })
+                });
+
+                if (response.ok) {
+                    loadMembers(); // Reload to show updated skills
+                } else {
+                    throw new Error('Failed to update skills');
+                }
+            } catch (error) {
+                console.error('Error updating skills:', error);
+                alert('Failed to update skills. Please try again.');
+            }
+        }
+
+        async function loadAISuggestions() {
+            const suggestionsDiv = document.getElementById('aiSuggestions');
+            try {
+                const response = await fetch('/api/workload-suggestions');
+                const data = await response.json();
+                const parsedSuggestions = JSON.parse(data.suggestions);
+
+                if (!parsedSuggestions.hasSuggestions) {
+                    suggestionsDiv.innerHTML = '<p class="text-yellow-500">No workload redistribution suggestions at this time.</p>';
+                    return;
+                }
+
+                // Modified suggestion template to ensure full account ID is used
+                const suggestionsHtml = parsedSuggestions.moves.map(move => {
+                    // Debug logging
+                    console.log('Processing move suggestion:', {
+                        taskId: move.TaskID,
+                        toAssigneeId: move.ToAssigneeId,
+                        fullMove: move
+                    });
+                    
+                    return `
+                    <div class="bg-gray-700 p-4 rounded-lg mb-4 flex justify-between items-start" data-task-id="${move.TaskID}">
+                        <div class="flex-1">
+                            <h3 class="text-xl font-bold text-white">${move.TaskName}</h3>
+                            <div class="mt-2 text-gray-300">
+                                <p>Task ID: ${move.TaskID}</p>
+                                <p>From: ${move.FromAssignee} (${move.FromAssigneeId})</p>
+                                <p>To: ${move.ToAssignee} (${move.ToAssigneeId})</p>
+                                <p>Workload Impact:</p>
+                                <p>- ${move.FromAssignee}: ${move.workloadChanges.from}</p>
+                                <p>- ${move.ToAssignee}: ${move.workloadChanges.to}</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 ml-4 items-center">
+                            <button onclick="acceptMove('${move.TaskID}', '${move.ToAssigneeId}')" 
+                                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+                                    title="Reassign to ${move.ToAssignee}">
+                                ✓
+                            </button>
+                            <button onclick="rejectMove('${move.TaskID}')"
+                                    class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">
+                                ✗
+                            </button>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+
+                console.log('Generated HTML:', suggestionsHtml);
+                suggestionsDiv.innerHTML = suggestionsHtml;
+            } catch (error) {
+                console.error('Error loading AI suggestions:', error);
+                suggestionsDiv.innerHTML = 
+                    '<p class="text-red-500">Failed to load suggestions. Please try again.</p>';
+            }
+        }
+
+        async function acceptMove(taskId, newAssignee) {
+            try {
+                // Validate the assignee ID format
+                if (!newAssignee || !newAssignee.includes(':')) {
+                    throw new Error(`Invalid assignee ID format: ${newAssignee}`);
+                }
+
+                console.log('Accepting move with full details:', {
+                    taskId,
+                    newAssignee,
+                    isFullAccountId: newAssignee.includes(':'),
+                    requestBody: JSON.stringify({ newAssignee })
+                });
+
+                const response = await fetch(`/api/tasks/${taskId}/assignee`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ newAssignee })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('Error response:', errorData);
+                    throw new Error(errorData.error || 'Failed to reassign task');
+                }
+
+                // Remove the suggestion from UI
+                const suggestionElement = document.querySelector(`[data-task-id="${taskId}"]`);
+                if (suggestionElement) {
+                    suggestionElement.remove();
+                }
+
+                // Check if there are any remaining suggestions
+                const remainingSuggestions = document.querySelectorAll('#aiSuggestions > div[data-task-id]');
+                if (remainingSuggestions.length === 0) {
+                    document.getElementById('aiSuggestions').innerHTML = 
+                        '<p class="text-yellow-500">No more suggestions available. Click refresh for new suggestions.</p>';
+                }
+
+                alert('Task reassigned successfully!');
+            } catch (error) {
+                console.error('Error accepting move:', error);
+                alert(`Failed to reassign task: ${error.message}`);
+            }
+        }
+
+        function rejectMove(taskId) {
+            // Remove the suggestion from the UI
+            const suggestionElement = document.querySelector(`[data-task-id="${taskId}"]`);
+            if (suggestionElement) {
+                suggestionElement.remove();
+                
+                // Check if there are any remaining suggestions
+                const remainingSuggestions = document.querySelectorAll('#aiSuggestions > div[data-task-id]');
+                if (remainingSuggestions.length === 0) {
+                    document.getElementById('aiSuggestions').innerHTML = 
+                        '<p class="text-yellow-500">No more suggestions available. Click refresh for new suggestions.</p>';
+                }
+            }
+        }
+
+        // Load members when the page loads
+        document.addEventListener('DOMContentLoaded', loadMembers);
+
+        // Load suggestions when the page loads
+        document.addEventListener('DOMContentLoaded', loadAISuggestions);
+    </script>
+</body>
+</html> 

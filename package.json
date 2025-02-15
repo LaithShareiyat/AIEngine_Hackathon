@@ -1,8 +1,42 @@
 {
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
+    "@types/express": "^5.0.0",
     "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "path": "^0.12.7",
     "pg": "^8.13.3"
+  },
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "test:db": "ts-node src/testConnection.ts",
+    "test:jira": "ts-node src/testJiraConnection.ts",
+    "migrate": "ts-node src/database/migrations/001_create_user_skills.ts",
+    "migrate:hours": "ts-node src/database/migrations/002_add_weekly_hours.ts",
+    "build": "tsc"
+  },
+  "name": "aiengine_hackathon",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SupremeDictatorI/AIEngine_Hackathon.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SupremeDictatorI/AIEngine_Hackathon/issues"
+  },
+  "homepage": "https://github.com/SupremeDictatorI/AIEngine_Hackathon#readme",
+  "devDependencies": {
+    "@types/dotenv": "^6.1.1",
+    "@types/node": "^22.13.4",
+    "@types/pg": "^8.11.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
   }
 }
