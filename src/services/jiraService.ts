@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { JiraTask } from '../types';
+import { JiraTask, Employee } from '../types';
 import pool from '../config/database';
 
 // Define interfaces at the top of the file
@@ -144,10 +144,11 @@ export class JiraService {
         }
       );
 
-      // Calculate workload intensity for each member
-      const workloadMap = new Map<string, number>();
+      // Reset and initialize workload tracking
+      const workloadMap = new Map<string, { dailyHours: number, totalHours: number }>();
+      const taskCountMap = new Map<string, number>();
       const NOW = new Date();
-      const DAYS_IN_WEEK = 5; // Assuming 5 working days per week
+      const DAYS_IN_WEEK = 5;
 
       tasksResponse.data.issues.forEach((task: any) => {
         if (task.fields.assignee) {
@@ -155,33 +156,56 @@ export class JiraService {
           const assigneeEmail = task.fields.assignee.emailAddress;
           const weeklyHours = hoursMap.get(assigneeEmail) || 40;
           
-          const workloadFactor = this.calculateTaskWorkloadFactor(
+          // Track task count
+          taskCountMap.set(assigneeId, (taskCountMap.get(assigneeId) || 0) + 1);
+          
+          const hours = this.calculateTaskWorkloadFactor(
             task.fields,
             weeklyHours,
             NOW,
             DAYS_IN_WEEK
           );
           
-          // Add debug logging
-          console.log('Task Assignment:', {
-            taskSummary: task.fields.summary,
-            assigneeName: task.fields.assignee.displayName,
-            assigneeId,
-            assigneeEmail,
-            weeklyHours,
-            workloadFactor,
-            currentWorkload: workloadMap.get(assigneeId) || 0
+          // Detailed logging for each task's contribution
+          console.log('Individual Task Contribution:', {
+            assignee: task.fields.assignee.displayName,
+            taskKey: task.key,
+            summary: task.fields.summary,
+            estimatedHours: task.fields.timeestimate ? task.fields.timeestimate / 3600 : 0,
+            dailyHours: hours.dailyHours,
+            totalHours: hours.totalHours,
+            currentTotal: workloadMap.get(assigneeId) || { dailyHours: 0, totalHours: 0 },
+            taskCount: taskCountMap.get(assigneeId)
           });
           
+          const current = workloadMap.get(assigneeId) || { dailyHours: 0, totalHours: 0 };
           workloadMap.set(
             assigneeId,
-            (workloadMap.get(assigneeId) || 0) + workloadFactor
+            {
+              dailyHours: current.dailyHours + hours.dailyHours,
+              totalHours: current.totalHours + hours.totalHours
+            }
           );
         }
       });
 
-      // After processing all tasks, log the final workload map
-      console.log('Final Workload Map:', Object.fromEntries(workloadMap));
+      // Calculate final workload percentages
+      const finalWorkloads = Array.from(workloadMap.entries()).map(([id, hours]) => {
+        const member = membersResponse.data.find((m: any) => m.accountId === id);
+        const weeklyHours = hoursMap.get(member?.emailAddress) || 40;
+        const dailyCapacity = weeklyHours / DAYS_IN_WEEK;
+        
+        return {
+          assignee: member?.displayName,
+          workloadPercentage: Math.round((hours.dailyHours / dailyCapacity) * 100),
+          dailyHours: Math.round(hours.dailyHours * 10) / 10,
+          totalHours: Math.round(hours.totalHours * 10) / 10,
+          dailyCapacity: dailyCapacity
+        };
+      });
+
+      // Log final workload summary
+      console.log('Final Workload Summary:', finalWorkloads);
 
       // Create skills map
       const skillsMap = userSkills.reduce((map: Map<string, string[]>, row: any) => {
@@ -193,24 +217,26 @@ export class JiraService {
       }, new Map());
 
       const result = membersResponse.data.map((member: any) => {
-        const intensity = Math.round((workloadMap.get(member.accountId) || 0) * 100) / 100;
+        const weeklyHours = hoursMap.get(member.emailAddress) || 40;
+        const dailyCapacity = weeklyHours / DAYS_IN_WEEK;
         
-        // Add debug logging for each member
-        console.log('Member Workload:', {
-          name: member.displayName,
-          accountId: member.accountId,
-          emailAddress: member.emailAddress,
-          rawWorkload: workloadMap.get(member.accountId),
-          calculatedIntensity: intensity
-        });
+        // Get total required hours and total available hours
+        const workloadData = workloadMap.get(member.accountId) || { dailyHours: 0, totalHours: 0 };
+        const totalRequiredHours = workloadData.totalHours;
         
+        // Calculate total available hours across all tasks' working days
+        const totalAvailableHours = dailyCapacity * DAYS_IN_WEEK;
+        
+        // Calculate intensity as percentage of total available time
+        const intensity = Math.round((totalRequiredHours / totalAvailableHours) * 100) / 100;
+
         return {
           id: member.accountId,
           name: member.displayName,
           avatar: member.avatarUrls['48x48'],
           skills: skillsMap.get(member.accountId) || [],
           workloadIntensity: intensity,
-          weeklyHours: hoursMap.get(member.emailAddress) || 40
+          weeklyHours: weeklyHours
         };
       });
 
@@ -226,37 +252,48 @@ export class JiraService {
     weeklyHours: number,
     now: Date,
     daysInWeek: number
-  ): number {
+  ): { dailyHours: number, totalHours: number } {
+    // Convert from seconds to hours
     const estimatedHours = (taskFields.timeestimate || 0) / 3600;
-    if (estimatedHours === 0) return 0;
+    if (estimatedHours === 0) return { dailyHours: 0, totalHours: 0 };
 
     const dueDate = taskFields.duedate ? new Date(taskFields.duedate) : null;
-    if (!dueDate) return estimatedHours / (weeklyHours * 2);
-
+    
+    // Calculate available working days until due date
     let workingDays = 0;
-    const currentDate = new Date(now);
-    currentDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(dueDate);
-    endDate.setHours(23, 59, 59, 999);
-    
-    while (currentDate <= endDate) {
-      const dayOfWeek = currentDate.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        workingDays++;
+    if (dueDate) {
+      const currentDate = new Date(now);
+      while (currentDate <= dueDate) {
+        if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) {
+          workingDays++;
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
       }
-      currentDate.setDate(currentDate.getDate() + 1);
+    } else {
+      workingDays = 10; // Default to 2 weeks
     }
 
-    const weeksUntilDue = Math.max(0.2, workingDays / 5);
-    const availableHours = weeklyHours * weeksUntilDue;
-    
-    let factor = estimatedHours / availableHours;
+    workingDays = Math.max(1, workingDays);
 
-    if (taskFields.status?.name === 'In Progress') {
-      factor *= 1.2;
-    }
+    // Calculate total available hours until due date
+    const dailyAvailableHours = weeklyHours / daysInWeek;
+    const totalAvailableHours = workingDays * dailyAvailableHours;
 
-    return factor;
+    // Calculate workload intensity as a percentage of total available time
+    const workloadIntensity = estimatedHours / totalAvailableHours;
+
+    console.log('Task Workload Calculation:', {
+      summary: taskFields.summary,
+      estimatedHours,
+      workingDays,
+      totalAvailableHours,
+      workloadIntensity: workloadIntensity * 100 + '%'
+    });
+
+    return {
+      dailyHours: workloadIntensity * dailyAvailableHours,
+      totalHours: estimatedHours
+    };
   }
 
   async updateMemberSkills(memberId: string, skills: string[]) {
@@ -379,5 +416,137 @@ export class JiraService {
       }
       throw error; // Throw the original error to preserve the details
     }
+  }
+
+  async getJiraUsers(): Promise<any[]> {
+    try {
+      const response = await axios.get(
+        `${this.baseUrl}/user/assignable/search`,
+        {
+          auth: this.auth,
+          params: {
+            project: process.env.JIRA_PROJECT_KEY,
+            maxResults: 100
+          }
+        }
+      );
+
+      // We're already returning the email addresses
+      return response.data.filter((user: any) => user.active).map((user: any) => ({
+        accountId: user.accountId,
+        displayName: user.displayName,
+        emailAddress: user.emailAddress,  // Email is included here
+        avatar: user.avatarUrls['48x48']
+      }));
+    } catch (error) {
+      console.error('Error fetching Jira users:', error);
+      throw error;
+    }
+  }
+
+  async getAIWorkloadSuggestions(
+    employees: Employee[],
+    tasks: JiraTask[]
+  ): Promise<string> {
+    const todoTasks = tasks.filter(task => task.status === 'To Do');
+    
+    // Calculate current workload for each employee
+    const employeeWorkloads = new Map<string, number>();
+    employees.forEach(emp => {
+      const assignedTasks = tasks.filter(task => 
+        task.assignee === emp.id && task.status !== 'Done'
+      );
+      
+      const workload = assignedTasks.reduce((total, task) => {
+        const result = this.calculateTaskWorkloadFactor(
+          {
+            timeestimate: task.estimatedHours * 3600,
+            duedate: task.dueDate,
+            priority: { name: task.priority }
+          },
+          emp.weeklyHours,
+          new Date(),
+          5
+        );
+        return total + result.dailyHours;
+      }, 0);
+      
+      employeeWorkloads.set(emp.id, workload);
+    });
+
+    // Log current workloads
+    console.log('Current workloads:', Object.fromEntries(employeeWorkloads));
+
+    // Define overload threshold
+    const OVERLOAD_THRESHOLD = 0.8; // 80% capacity
+
+    // Filter out employees who are already overloaded
+    const availableEmployees = employees.filter(emp => {
+      const currentWorkload = employeeWorkloads.get(emp.id) || 0;
+      return currentWorkload < OVERLOAD_THRESHOLD;
+    });
+
+    // Sort tasks by priority and complexity
+    todoTasks.sort((a, b) => {
+      const priorityWeight: Record<string, number> = {
+        'Highest': 5,
+        'High': 4,
+        'Medium': 3,
+        'Low': 2,
+        'Lowest': 1
+      };
+      
+      const getPriorityWeight = (priority: string): number => 
+        priorityWeight[priority as keyof typeof priorityWeight] || 3;
+
+      return getPriorityWeight(b.priority) - getPriorityWeight(a.priority) ||
+             b.complexity - a.complexity;
+    });
+
+    // Generate suggestions
+    const suggestions = todoTasks.map(task => {
+      // Find best match based on skills and current workload
+      const bestMatch = availableEmployees
+        .filter(emp => {
+          const hasRequiredSkills = task.requiredSkills.every(skill => 
+            emp.skills.includes(skill)
+          );
+          const currentWorkload = employeeWorkloads.get(emp.id) || 0;
+          const taskWorkload = this.calculateTaskWorkloadFactor(
+            {
+              timeestimate: task.estimatedHours * 3600,
+              duedate: task.dueDate,
+              priority: { name: task.priority }
+            },
+            emp.weeklyHours,
+            new Date(),
+            5
+          ).dailyHours;
+          
+          // Check if adding this task would overload the employee
+          return hasRequiredSkills && 
+                 (currentWorkload + taskWorkload) < OVERLOAD_THRESHOLD;
+        })
+        .sort((a, b) => {
+          const workloadA = employeeWorkloads.get(a.id) || 0;
+          const workloadB = employeeWorkloads.get(b.id) || 0;
+          return workloadA - workloadB;
+        })[0];
+
+      if (bestMatch) {
+        return {
+          taskId: task.id,
+          fromAssignee: task.assignee,
+          toAssignee: bestMatch.id,
+          reason: `Better workload distribution and matching skills`
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    return JSON.stringify({
+      hasSuggestions: suggestions.length > 0,
+      suggestions
+    });
   }
 } 

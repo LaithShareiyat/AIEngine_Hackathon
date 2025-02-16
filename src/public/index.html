@@ -3,17 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Team Skills Management</title>
+    <title>NeuroLoad AI</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-900 text-gray-100">
     <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold mb-8 text-white">Team Member Skills</h1>
+        <h1 class="text-3xl font-bold mb-8 text-white">NeuroLoad AI</h1>
         
         <!-- Skills List Section -->
         <div class="mb-8">
-            <h2 class="text-2xl font-bold mb-4 text-white">Skills</h2>
-            <div id="skillsList" class="flex flex-wrap gap-2">
+            <div class="flex items-center justify-between cursor-pointer" 
+                 onclick="toggleSkillsList()" 
+                 id="skillsHeader">
+                <h2 class="text-2xl font-bold mb-4 text-white">Skills</h2>
+                <button class="text-gray-400 hover:text-white transition-colors">
+                    <span id="skillsCollapseIcon">▼</span>
+                </button>
+            </div>
+            <div id="skillsList" class="flex flex-wrap gap-2 transition-all duration-300">
                 <!-- Skills will be added here dynamically -->
             </div>
         </div>
@@ -32,8 +39,65 @@
             </div>
         </div>
 
-        <div id="membersList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <!-- Members will be added here dynamically -->
+        <!-- Users Section -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between cursor-pointer" 
+                 onclick="toggleUsersList()" 
+                 id="usersHeader">
+                <h2 class="text-2xl font-bold mb-4 text-white">Team Members</h2>
+                <div class="flex items-center">
+                    <button onclick="event.stopPropagation(); showAddUserModal()" 
+                            class="mr-4 bg-green-600 text-white px-4 py-2 rounded-full text-sm hover:bg-green-700">
+                        Add Member
+                    </button>
+                    <button class="text-gray-400 hover:text-white transition-colors">
+                        <span id="usersCollapseIcon">▼</span>
+                    </button>
+                </div>
+            </div>
+            <div id="membersList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-300">
+                <!-- Members will be added here dynamically -->
+            </div>
+        </div>
+
+        <!-- Add User Modal -->
+        <div id="addUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
+                <h3 class="text-xl font-bold mb-4 text-white">Add Team Member</h3>
+                <form id="addUserForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300">Select Jira User</label>
+                        <select id="jiraUserSelect" class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white">
+                            <option value="">Loading users...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300">Full Name</label>
+                        <input type="text" id="userName" class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300">Weekly Working Hours</label>
+                        <input type="number" id="weeklyHours" value="40" min="1" max="168" 
+                               class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300">Skills</label>
+                        <div class="mt-2 flex flex-wrap gap-2" id="skillSelection">
+                            <!-- Skills will be added here dynamically -->
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-4 mt-6">
+                        <button type="button" onclick="hideAddUserModal()" 
+                                class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
+                            Cancel
+                        </button>
+                        <button type="submit" 
+                                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                            Add Member
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -52,6 +116,12 @@
                         ${skill}
                     </span>
                 `).join('');
+
+                // Add initial styles for animation
+                skillsList.style.maxHeight = skillsList.scrollHeight + 'px';
+                skillsList.style.overflow = 'hidden';
+                skillsList.style.transition = 'max-height 0.3s ease-out, opacity 0.3s ease-out';
+                skillsList.style.opacity = '1';
             } catch (error) {
                 console.error('Failed to load skills:', error);
                 AVAILABLE_SKILLS = [];
@@ -330,11 +400,156 @@
             }
         }
 
+        function toggleSkillsList() {
+            const skillsList = document.getElementById('skillsList');
+            const collapseIcon = document.getElementById('skillsCollapseIcon');
+            
+            if (skillsList.style.display === 'none') {
+                skillsList.style.display = 'flex';
+                collapseIcon.textContent = '▼';
+                // Animate expansion
+                skillsList.style.maxHeight = skillsList.scrollHeight + 'px';
+                skillsList.style.opacity = '1';
+            } else {
+                // Animate collapse
+                skillsList.style.maxHeight = '0';
+                skillsList.style.opacity = '0';
+                setTimeout(() => {
+                    skillsList.style.display = 'none';
+                }, 300);
+                collapseIcon.textContent = '▶';
+            }
+        }
+
+        function toggleUsersList() {
+            const membersList = document.getElementById('membersList');
+            const collapseIcon = document.getElementById('usersCollapseIcon');
+            
+            if (membersList.style.display === 'none') {
+                membersList.style.display = 'grid';
+                collapseIcon.textContent = '▼';
+                membersList.style.maxHeight = membersList.scrollHeight + 'px';
+                membersList.style.opacity = '1';
+            } else {
+                membersList.style.maxHeight = '0';
+                membersList.style.opacity = '0';
+                setTimeout(() => {
+                    membersList.style.display = 'none';
+                }, 300);
+                collapseIcon.textContent = '▶';
+            }
+        }
+
+        async function loadJiraUsers() {
+            try {
+                const response = await fetch('/api/jira-users');
+                const users = await response.json();
+                
+                const select = document.getElementById('jiraUserSelect');
+                select.innerHTML = `<option value="">Select a user...</option>` +
+                    users.map(user => `
+                        <option value="${user.accountId}" 
+                                data-email="${user.emailAddress}"
+                                data-name="${user.displayName}">
+                            ${user.displayName} (${user.emailAddress})
+                        </option>
+                    `).join('');
+            } catch (error) {
+                console.error('Error loading Jira users:', error);
+            }
+        }
+
+        function showAddUserModal() {
+            const modal = document.getElementById('addUserModal');
+            modal.classList.remove('hidden');
+            loadJiraUsers();
+            updateSkillSelection();
+        }
+
+        function hideAddUserModal() {
+            const modal = document.getElementById('addUserModal');
+            modal.classList.add('hidden');
+        }
+
+        function updateSkillSelection() {
+            const skillSelection = document.getElementById('skillSelection');
+            skillSelection.innerHTML = AVAILABLE_SKILLS.map(skill => `
+                <label class="inline-flex items-center bg-gray-700 px-3 py-1 rounded-full">
+                    <input type="checkbox" value="${skill}" class="mr-2">
+                    <span class="text-sm text-blue-300">${skill}</span>
+                </label>
+            `).join('');
+        }
+
+        // Add form submission handler
+        document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const jiraUser = document.getElementById('jiraUserSelect');
+            const selectedOption = jiraUser.options[jiraUser.selectedIndex];
+            const skills = Array.from(document.querySelectorAll('#skillSelection input:checked'))
+                .map(input => input.value);
+
+            try {
+                const response = await fetch('/api/members', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        jiraAccountId: jiraUser.value,
+                        email: selectedOption.dataset.email,
+                        name: document.getElementById('userName').value,
+                        weeklyHours: parseInt(document.getElementById('weeklyHours').value),
+                        skills: skills
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to add member');
+
+                hideAddUserModal();
+                loadMembers(); // Refresh the members list
+                alert('Team member added successfully!');
+            } catch (error) {
+                console.error('Error adding member:', error);
+                alert('Failed to add team member: ' + error.message);
+            }
+        });
+
         // Load members when the page loads
         document.addEventListener('DOMContentLoaded', loadMembers);
 
         // Load suggestions when the page loads
         document.addEventListener('DOMContentLoaded', loadAISuggestions);
     </script>
+
+    <style>
+        /* Add these styles to your existing styles */
+        #skillsList {
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            overflow: hidden;
+        }
+
+        #skillsHeader:hover {
+            opacity: 0.8;
+        }
+
+        #skillsCollapseIcon {
+            transition: transform 0.3s ease;
+        }
+
+        #membersList {
+            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+            overflow: hidden;
+        }
+
+        #addUserModal {
+            z-index: 1000;
+        }
+
+        .modal-open {
+            overflow: hidden;
+        }
+    </style>
 </body>
 </html> 

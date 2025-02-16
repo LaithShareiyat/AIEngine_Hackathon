@@ -122,4 +122,41 @@ const updateTaskAssignee: RequestHandler<
 
 router.put('/tasks/:taskId/assignee', updateTaskAssignee);
 
+// Add this new endpoint to get Jira users
+router.get('/jira-users', async (req, res) => {
+  try {
+    const users = await jiraService.getJiraUsers();
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching Jira users:', error);
+    res.status(500).json({ error: 'Failed to fetch Jira users' });
+  }
+});
+
+// Add this endpoint to create a new member
+router.post('/members', async (req, res) => {
+  try {
+    const { jiraAccountId, email, name, weeklyHours, skills } = req.body;
+    
+    // First, create the employee record
+    const { rows } = await pool.query(
+      'INSERT INTO employees (name, email, weekly_working_hours) VALUES ($1, $2, $3) RETURNING id',
+      [name, email, weeklyHours]
+    );
+
+    // Then add their skills
+    for (const skill of skills) {
+      await pool.query(
+        'INSERT INTO user_skills (user_id, skill) VALUES ($1, $2)',
+        [jiraAccountId, skill]
+      );
+    }
+
+    res.json({ message: 'Member added successfully', id: rows[0].id });
+  } catch (error) {
+    console.error('Error adding member:', error);
+    res.status(500).json({ error: 'Failed to add member' });
+  }
+});
+
 export default router; 
