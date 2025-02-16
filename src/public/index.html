@@ -305,6 +305,9 @@
                         '<p class="text-yellow-500">No more suggestions available. Click refresh for new suggestions.</p>';
                 }
 
+                // Refresh the members list to update workload display
+                await loadMembers();
+
                 alert('Task reassigned successfully!');
             } catch (error) {
                 console.error('Error accepting move:', error);
