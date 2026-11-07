@@ -180,7 +180,7 @@ export class WorkloadAnalyzer {
       STRICT TASK MOVEMENT RULES:
       1. A task can ONLY be moved if:
          - The new assignee has EVERY SINGLE task label in their skills list (100% match required)
-         - The move helps balance workload between Laith and Hasan
+         - The move helps balance workload across the team
          - The new assignee is different from the current assignee
       2. Skill Matching Process:
          - Take each task label
