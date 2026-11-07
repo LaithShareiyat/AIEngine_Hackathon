@@ -1,1 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (keep secrets out of git)
 .env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor files
+.DS_Store
+.vscode/
+.idea/
